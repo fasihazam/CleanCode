@@ -1,0 +1,55 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and deploy iOS to Firebase App Distribution"
+
+  lane :deploy do
+
+    setup_ci
+
+    # Check required environment variables
+    unless ENV["FIREBASE_APP_ID_IOS"] && ENV["FIREBASE_TOKEN"] && ENV["RELEASE_NOTES"] && ENV["FLUTTER_BUILD_NUMBER"]
+      UI.user_error!("Missing one or more required environment variables: FIREBASE_APP_ID_IOS, FIREBASE_TOKEN, RELEASE_NOTES, FLUTTER_BUILD_NUMBER")
+    end
+
+    # Configure code signing with match
+    match(
+      username: "apple-dev@solaranlagen-porrmann.de",
+      app_identifier: "info.lieferking.mapleharvest",
+      git_url: "https://github.com/Solaranlagen-Porrmann/maple-harvest-app-certificates.git",
+      platform: "ios",
+      type: "adhoc",
+      readonly: is_ci
+    )
+    # Update the version in pubspec.yaml with GitHub Actions build number
+    UI.message("Updating version in pubspec.yaml to GitHub Actions build number #{ENV['FLUTTER_BUILD_NUMBER']}")
+    
+    # Use `sed` to replace the version number in pubspec.yaml
+    sh("ls -ltr")
+
+    # Build the iOS app with specific provisioning profile
+    build_ios_app(
+      workspace: "Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "ad-hoc",
+      output_name: "Runner.ipa",    # Specify output file name
+      output_directory: "./build",  # Specify output directory for ipa
+      export_options: {
+        provisioningProfiles: {
+          "info.lieferking.mapleharvest" => "match AdHoc info.lieferking.mapleharvest"
+        }
+      }
+    )
+
+    upload_symbols_to_crashlytics(dsym_path: "./build/Runner.app.dSYM.zip", gsp_path: "./Runner/GoogleService-Info.plist")
+
+    # Distribute the build to Firebase App Distribution
+    firebase_app_distribution(
+      app: ENV["FIREBASE_APP_ID_IOS"], 
+      ipa_path: "./build/Runner.ipa",
+      release_notes: ENV["RELEASE_NOTES"],
+      groups: "develop-testers",
+      firebase_cli_token: ENV["FIREBASE_TOKEN"]
+    )
+  end
+end
